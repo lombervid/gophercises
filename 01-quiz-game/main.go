@@ -5,16 +5,19 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"os"
+	"strings"
 	"time"
 )
 
-func parseArguments() (csv string, limit int) {
+func parseArguments() (csv string, limit int, shuffle bool) {
 	flag.StringVar(&csv, "csv", "problems.csv", "a csv file in the format of 'question,answer'")
 	flag.IntVar(&limit, "limit", 30, "the time limit for the quiz in seconds")
+	flag.BoolVar(&shuffle, "shuffle", false, "shuffle the quiz order")
 	flag.Parse()
 
-	return csv, limit
+	return csv, limit, shuffle
 }
 
 func readFile(filePath string) ([][]string, error) {
@@ -40,7 +43,9 @@ func evaluateProblems(problems [][]string, c chan<- struct{}) {
 		fmt.Printf("Problem #%d: %s = ", i+1, problem[0])
 		fmt.Scan(&answer)
 
-		if answer == problem[1] {
+		answer = strings.TrimSpace(answer)
+
+		if strings.EqualFold(answer, problem[1]) {
 			c <- struct{}{}
 		}
 	}
@@ -48,11 +53,17 @@ func evaluateProblems(problems [][]string, c chan<- struct{}) {
 }
 
 func main() {
-	csvFile, limit := parseArguments()
+	csvFile, limit, shuffle := parseArguments()
 
 	problems, err := readFile(csvFile)
 	if err != nil {
 		log.Fatal("ERROR ", err)
+	}
+
+	if shuffle {
+		rand.Shuffle(len(problems), func(i, j int) {
+			problems[i], problems[j] = problems[j], problems[i]
+		})
 	}
 
 	fmt.Printf("Press 'Enter' to start...")
