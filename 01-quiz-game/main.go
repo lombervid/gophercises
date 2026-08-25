@@ -6,13 +6,15 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 )
 
-func parseArguments() string {
-	csv := flag.String("csv", "problems.csv", "a csv file in the format of 'question,answer'")
+func parseArguments() (csv string, limit int) {
+	flag.StringVar(&csv, "csv", "problems.csv", "a csv file in the format of 'question,answer'")
+	flag.IntVar(&limit, "limit", 30, "the time limit for the quiz in seconds")
 	flag.Parse()
 
-	return *csv
+	return csv, limit
 }
 
 func readFile(filePath string) ([][]string, error) {
@@ -31,8 +33,7 @@ func readFile(filePath string) ([][]string, error) {
 	return problems, nil
 }
 
-func evaluateProblems(problems [][]string) int {
-	var correctAnswers int
+func evaluateProblems(problems [][]string, c chan<- struct{}) {
 	for i, problem := range problems {
 		var answer string
 
@@ -40,20 +41,42 @@ func evaluateProblems(problems [][]string) int {
 		fmt.Scan(&answer)
 
 		if answer == problem[1] {
-			correctAnswers++
+			c <- struct{}{}
 		}
 	}
-	return correctAnswers
+	close(c)
 }
 
 func main() {
-	csvFile := parseArguments()
+	csvFile, limit := parseArguments()
 
 	problems, err := readFile(csvFile)
 	if err != nil {
 		log.Fatal("ERROR ", err)
 	}
 
-	correctAnswers := evaluateProblems(problems)
+	fmt.Printf("Press 'Enter' to start...")
+	fmt.Scanln()
+
+	var correctAnswers int
+	answerCh := make(chan struct{})
+	timer := time.NewTimer(time.Duration(limit) * time.Second)
+
+	go evaluateProblems(problems, answerCh)
+
+loop:
+	for {
+		select {
+		case _, ok := <-answerCh:
+			if !ok {
+				break loop
+			}
+			correctAnswers++
+		case <-timer.C:
+			fmt.Println("")
+			close(answerCh)
+		}
+	}
+
 	fmt.Printf("Your score is %d out of %d.\n", correctAnswers, len(problems))
 }
