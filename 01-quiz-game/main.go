@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+type Problem struct {
+	Question string
+	Answer   string
+}
+
 func parseArguments() (csv string, limit int, shuffle bool) {
 	flag.StringVar(&csv, "csv", "problems.csv", "a csv file in the format of 'question,answer'")
 	flag.IntVar(&limit, "limit", 30, "the time limit for the quiz in seconds")
@@ -20,42 +25,61 @@ func parseArguments() (csv string, limit int, shuffle bool) {
 	return csv, limit, shuffle
 }
 
-func readFile(filePath string) ([][]string, error) {
-	file, err := os.Open(filePath)
+func parseCSV(filename string) ([]Problem, error) {
+	file, err := os.Open(filename)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf(`Failed to open the file: "%s"`, filename)
 	}
 	defer file.Close()
 
 	reader := csv.NewReader(file)
-	problems, err := reader.ReadAll()
+	lines, err := reader.ReadAll()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Failed to parse the provided CSV file.")
+	}
+
+	problems := make([]Problem, len(lines))
+	for i, line := range lines {
+		problems[i] = Problem{
+			Question: line[0],
+			Answer:   strings.TrimSpace(line[1]),
+		}
 	}
 
 	return problems, nil
 }
 
-func evaluateProblems(problems [][]string, c chan<- struct{}) {
-	for i, problem := range problems {
-		var answer string
+func readAnswer(number int, question string, c chan<- string) {
+	fmt.Printf("Problem #%d: %s = ", number, question)
+	var answer string
+	fmt.Scan(&answer)
+	c <- answer
+}
 
-		fmt.Printf("Problem #%d: %s = ", i+1, problem[0])
-		fmt.Scan(&answer)
+func evaluateProblems(problems []Problem, timer *time.Timer) int {
+	var correct int
+	answerCh := make(chan string)
+	for i, p := range problems {
+		go readAnswer(i+1, p.Question, answerCh)
 
-		answer = strings.TrimSpace(answer)
-
-		if strings.EqualFold(answer, problem[1]) {
-			c <- struct{}{}
+		select {
+		case <-timer.C:
+			fmt.Println("")
+			return correct
+		case answer := <-answerCh:
+			if strings.EqualFold(answer, p.Answer) {
+				correct++
+			}
 		}
 	}
-	close(c)
+
+	return correct
 }
 
 func main() {
-	csvFile, limit, shuffle := parseArguments()
+	csvFilename, timeLimit, shuffle := parseArguments()
 
-	problems, err := readFile(csvFile)
+	problems, err := parseCSV(csvFilename)
 	if err != nil {
 		log.Fatal("ERROR ", err)
 	}
@@ -68,26 +92,8 @@ func main() {
 
 	fmt.Printf("Press 'Enter' to start...")
 	fmt.Scanln()
+	timer := time.NewTimer(time.Duration(timeLimit) * time.Second)
 
-	var correctAnswers int
-	answerCh := make(chan struct{})
-	timer := time.NewTimer(time.Duration(limit) * time.Second)
-
-	go evaluateProblems(problems, answerCh)
-
-loop:
-	for {
-		select {
-		case _, ok := <-answerCh:
-			if !ok {
-				break loop
-			}
-			correctAnswers++
-		case <-timer.C:
-			fmt.Println("")
-			close(answerCh)
-		}
-	}
-
-	fmt.Printf("Your score is %d out of %d.\n", correctAnswers, len(problems))
+	correct := evaluateProblems(problems, timer)
+	fmt.Printf("Your score is %d out of %d.\n", correct, len(problems))
 }
